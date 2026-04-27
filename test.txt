@@ -1,0 +1,2 @@
+https://vercel.com/abdallamagdyofficials-projects/autospex/settings/environment-variables
+.\cloudflared-windows-amd64.exe tunnel --url http://localhost:3001

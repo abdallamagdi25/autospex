@@ -1,0 +1,7 @@
+tunnel: 54a0a32e-b85a-4b19-9be2-f43f4f89442b
+credentials-file: C:\Users\dell\.cloudflared\54a0a32e-b85a-4b19-9be2-f43f4f89442b.json
+
+ingress:
+  - hostname: api.autospex.online
+    service: http://localhost:3001
+  - service: http_status:404
