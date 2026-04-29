@@ -1,113 +1,131 @@
 import express from 'express';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import Groq from 'groq-sdk';
-import fetch from 'node-fetch'; // تأكد من تثبيته npm install node-fetch
+import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 
 dotenv.config();
 const router = express.Router();
 
-// ── إعداد المحركات ──
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const groq  = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-const SYSTEM_PROMPT = `
-أنت المساعد الهندسي الذكي الخاص بمنصة "AutoSpex". 
-خبير في الأتمتة الصناعية، برمجة Siemens S7-1200، و TIA Portal. 
-أجب باختصار هندسي دقيق، واستخدم لغة المستخدم (عربي/إنجليزي).
-إذا سُئلت عن شيء غير هندسي، اعتذر بلباقة وأخبر المستخدم أنك متخصص في AutoSpex فقط.
+// ============================================================================
+// 2. STRICT ENGINEERING RULESET (CORE AI LOGIC)
+// ============================================================================
+const STRICT_RULE = `
+أنت "AutoSpexy" — المساعد الهندسي الذكي والرسمي لمنصة AutoSpex.
+
+🔴 قواعد إلزامية صارمة لا يمكن تجاوزها:
+
+1) اللغة والترجمة:
+- تحدث بالعربية الفصحى الهندسية الواضحة فقط.
+- استخدم الإنجليزية للمصطلحات التقنية فقط (مثل: PLC, Sensor, Actuator).
+- يمنع منعاً باتاً خلط اللغات في نفس الجملة (مثل استخدام لغات روسية أو صينية).
+- اترك مسافة واضحة بين الكلمة العربية والمصطلح الإنجليزي.
+
+2) التنسيق والبنية (UI Formats):
+- استخدم علامة ### قبل العناوين الرئيسية.
+- استخدم علامة - قبل أي عنصر في قائمة أو خطوات.
+- استخدم علامة ** للكلمات المهمة والبارزة.
+- يمنع استخدام كلمات مثل [نقطة] أو [عنوان]. استخدم التنسيق القياسي فقط.
+
+3) كود الـ PLC و Ladder Logic (أهم قاعدة):
+- إذا قمت بكتابة كود Ladder Logic، يجب وضعه حصراً بين علامتي [LADDER] و [/LADDER].
+مثال صحيح:
+[LADDER]
+I0.0 ---> ( Q0.0 )
+[/LADDER]
+
+4) الروابط والمصادر:
+- لا ترسل أي رابط إلا إذا كان يعمل ومحدثاً لعام 2026.
+- اعتمد فقط على (Siemens Official Support / GitHub / YouTube).
+
+5) الأسلوب والذكاء:
+- إجابة عملية مباشرة في خطوات تنفيذ (Step-by-step).
 `;
 
-// ── 1. محرك Google Gemini (الأساسي) ──
-async function tryGemini(messages) {
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash", 
-    systemInstruction: SYSTEM_PROMPT 
-  });
+const SYSTEM_PROMPTS = {
+  autospex: `أنت AutoSpexy، خبير Siemens S7-1200 و PLC. ${STRICT_RULE}`,
+  global: `أنت AutoSpexy خبير Industry 4.0 و IIoT. ${STRICT_RULE}`,
+  troubleshoot: `أنت مهندس صيانة PLC. قدم Checklist احترافي. ${STRICT_RULE}`
+};
 
-  // تنظيف التاريخ لضمان البدء بـ user
-  let history = [];
-  let foundFirstUser = false;
-  for (const m of messages.slice(0, -1)) {
-    if (m.role === 'user') foundFirstUser = true;
-    if (foundFirstUser) {
-      history.push({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }]
-      });
-    }
+/* 🔴 Link Validator */
+async function isValidLink(url) {
+  try {
+    const res = await fetch(url, { method: 'HEAD', timeout: 3000 });
+    return res.ok;
+  } catch {
+    return false;
   }
-
-  const chat = model.startChat({ history });
-  const result = await chat.sendMessageStream(messages[messages.length - 1].content);
-  return result.stream;
 }
 
-// ── 2. محرك Groq Llama 3.3 (البديل الأول) ──
-async function tryGroq(messages) {
-  const completion = await groq.chat.completions.create({
+async function tryGroq(messages, activePrompt, modelName) {
+  return await groq.chat.completions.create({
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: activePrompt },
       ...messages.map(m => ({ role: m.role, content: m.content }))
     ],
-    model: "llama-3.3-70b-versatile",
+    model: modelName,
     stream: true,
+    temperature: 0.2, // تقليل درجة الحرارة لمنع الهلوسة
   });
-  return completion;
 }
 
-// ── 3. محرك Hugging Face Qwen (البديل الأخير) ──
-async function tryHuggingFace(userMessage) {
+async function tryHuggingFace(userMessage, activePrompt) {
+  const prompt = `${activePrompt}\n\nسؤال المستخدم: ${userMessage}`;
   const response = await fetch(
-    "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-Coder-32B-Instruct",
+    "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct",
     {
-      headers: { 
+      headers: {
         Authorization: `Bearer ${process.env.HUGGINGFACE_TOKEN}`,
         "Content-Type": "application/json"
       },
       method: "POST",
-      body: JSON.stringify({ inputs: userMessage }),
+      body: JSON.stringify({
+        inputs: prompt,
+        parameters: { max_new_tokens: 500, temperature: 0.2 }
+      })
     }
   );
+
+  if (!response.ok) throw new Error("HF Error");
+
   const result = await response.json();
-  // ملاحظة: Hugging Face API العادي لا يدعم الـ Streaming بسهولة كالآخرين، سنرسله كقطعة واحدة
-  return result[0]?.generated_text || "عذراً، جميع المحركات مشغولة حالياً.";
+  return result[0]?.generated_text.replace(prompt, "").trim();
 }
 
-// ── المسار الرئيسي ──
 router.post('/', async (req, res) => {
-  const { messages } = req.body;
+  const { messages, mode, modelChoice } = req.body;
   const userMessage = messages[messages.length - 1].content;
+  const activePrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.autospex;
 
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
 
   try {
-    console.log("🚀 Attempting Gemini...");
-    const stream = await tryGemini(messages);
-    for await (const chunk of stream) {
-      res.write(`data: ${JSON.stringify({ type: 'text', text: chunk.text() })}\n\n`);
+    let stream;
+
+    if (modelChoice === 'llama33') {
+      stream = await tryGroq(messages, activePrompt, "llama-3.3-70b-versatile");
+    } else if (modelChoice === 'llama31') {
+      stream = await tryGroq(messages, activePrompt, "llama-3.1-8b-instant");
     }
-  } catch (geminiError) {
-    console.error("⚠️ Gemini Limit Reached, switching to Groq...");
-    
-    try {
-      const groqStream = await tryGroq(messages);
-      for await (const chunk of groqStream) {
-        const content = chunk.choices[0]?.delta?.content || "";
-        if (content) res.write(`data: ${JSON.stringify({ type: 'text', text: content })}\n\n`);
+
+    if (stream) {
+      for await (const chunk of stream) {
+        let text = chunk.choices[0]?.delta?.content || "";
+        // تم إزالة الـ replace العشوائي لكي يقوم الفرونت إند بمعالجة [عنوان] و [LADDER] بشكل سليم
+        res.write(`data: ${JSON.stringify({ type: 'text', text })}\n\n`);
       }
-    } catch (groqError) {
-      console.error("❌ Groq Failed, using Hugging Face Static Backup...");
-      
-      try {
-        const hfText = await tryHuggingFace(userMessage);
-        res.write(`data: ${JSON.stringify({ type: 'text', text: hfText })}\n\n`);
-      } catch (hfError) {
-        res.write(`data: ${JSON.stringify({ type: 'error', message: 'All systems are down. Please check your API keys.' })}\n\n`);
-      }
+    } else if (modelChoice === 'qwen') {
+      let hfText = await tryHuggingFace(userMessage, activePrompt);
+      res.write(`data: ${JSON.stringify({ type: 'text', text: hfText })}\n\n`);
     }
+
+  } catch (error) {
+    res.write(`data: ${JSON.stringify({
+      type: 'error',
+      message: '⚠️ AutoSpexy غير متاح حالياً. جرّب موديل آخر.'
+    })}\n\n`);
   }
 
   res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);

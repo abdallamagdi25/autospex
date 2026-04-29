@@ -27,17 +27,14 @@ const LadderVisualizer = ({ code }) => (
   </div>
 );
 
-// ── دالة تحليل النصوص المدمجة (Bold + Links) ──
+// ── معالج النصوص والروابط ──
 const parseInlineText = (text, isAssistant) => {
   const parts = text.split(/(\*\*.*?\*\*|\[.*?\]\(https?:\/\/[^\s]+\)|https?:\/\/[a-zA-Z0-9-._~:/?#[\]@!$&'()*+,;=%]+)/g);
-  
   return parts.map((part, idx) => {
     if (!part) return null;
-
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={idx} className={`font-black ${isAssistant ? 'text-blue-800' : 'text-blue-100'}`}>{part.slice(2, -2)}</strong>;
     }
-
     const mdLinkMatch = part.match(/^\[(.*?)\]\((https?:\/\/[^\s]+)\)$/);
     if (mdLinkMatch) {
       return (
@@ -46,31 +43,41 @@ const parseInlineText = (text, isAssistant) => {
         </a>
       );
     }
-
     if (part.match(/^https?:\/\//)) {
       const cleanUrl = part.replace(/[.,:;)\]]+$/, '');
       let domain = 'زيارة الرابط';
       try { domain = new URL(cleanUrl).hostname.replace('www.', ''); } catch(e) {}
-
       return (
         <a key={idx} href={cleanUrl} target="_blank" rel="noopener noreferrer" dir="ltr" className="inline-flex items-center text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md text-[11px] hover:bg-blue-100 hover:shadow-sm mx-1 border border-blue-200 transition-all font-tech font-bold">
           <ExternalLink size={10} className="mr-1" /> {domain}
         </a>
       );
     }
-
     return <span key={idx}>{part}</span>;
   });
 };
 
-// ── محرك التنسيق المتقدم ──
+// 🔴 تم إرجاع الحماية الذكية (Anti-Crash) لمنع التجميد اللي حصل في Vercel 🔴
 const CleanUIContent = ({ content, isAssistant }) => {
-  if (content.includes('[LADDER]')) {
+  // 1. لو كود اللادر اكتمل
+  if (/\[LADDER\][\s\S]*?\[\/LADDER\]/i.test(content)) {
     const parts = content.split(/\[LADDER\]([\s\S]*?)\[\/LADDER\]/gi);
     return parts.map((p, i) => i % 2 === 1 ? <LadderVisualizer key={i} code={p} /> : <CleanUIContent key={i} content={p} isAssistant={isAssistant} />);
   }
+  
+  // 2. لو كود اللادر لسه بيتكتب (الحماية اللي بتمنع الـ Out of Memory)
+  if (/\[LADDER\]/i.test(content)) {
+    const parts = content.split(/\[LADDER\]/i);
+    return (
+      <>
+        <CleanUIContent content={parts[0]} isAssistant={isAssistant} />
+        <LadderVisualizer code={parts.slice(1).join('[LADDER]')} />
+      </>
+    );
+  }
 
-  if (content.includes('```')) {
+  // 3. لو كود برمجي عادي اكتمل
+  if (/```[\s\S]*?```/.test(content)) {
     const parts = content.split(/(```[\s\S]*?```)/g);
     return parts.map((p, i) => {
       if (p.startsWith('```')) {
@@ -81,22 +88,28 @@ const CleanUIContent = ({ content, isAssistant }) => {
     });
   }
 
+  // 4. لو كود برمجي عادي لسه بيتكتب
+  if (content.includes('```')) {
+    const parts = content.split('```');
+    const codeBody = parts.slice(1).join('```').replace(/^[a-z]*\n?/i, '');
+    return (
+      <>
+        <CleanUIContent content={parts[0]} isAssistant={isAssistant} />
+        <pre className="my-3 bg-[#0f172a] text-emerald-400 p-3 rounded-xl text-xs overflow-x-auto shadow-md" dir="ltr"><code>{codeBody}</code></pre>
+      </>
+    );
+  }
+
   const lines = content.split('\n');
   return (
     <div className={`space-y-1.5 text-[13px] leading-relaxed ${isAssistant ? 'text-slate-700' : 'text-white'}`}>
       {lines.map((line, i) => {
         const trimmed = line.trim();
         if (!trimmed) return <div key={i} className="h-1" />;
-
         if (trimmed.match(/^(###|##|#)\s*/)) {
           const cleanText = trimmed.replace(/^(###|##|#)\s*/, '');
-          return (
-            <h3 key={i} className="text-blue-800 font-black text-[14px] mt-4 mb-1 border-b border-blue-100 pb-1 inline-block">
-              {parseInlineText(cleanText, isAssistant)}
-            </h3>
-          );
+          return <h3 key={i} className="text-blue-800 font-black text-[14px] mt-4 mb-1 border-b border-blue-100 pb-1 inline-block">{parseInlineText(cleanText, isAssistant)}</h3>;
         }
-
         if (trimmed.match(/^([-*])\s+/)) {
           const cleanText = trimmed.replace(/^([-*])\s+/, '');
           return (
@@ -106,7 +119,6 @@ const CleanUIContent = ({ content, isAssistant }) => {
             </div>
           );
         }
-
         return <p key={i} className="font-semibold">{parseInlineText(trimmed, isAssistant)}</p>;
       })}
     </div>
@@ -125,7 +137,6 @@ const MessageBubble = ({ message }) => {
         .replace(/### (.*?)\n/g, '<h3 style="color:#1e40af;">$1</h3>')
         .replace(/[-*] (.*?)\n/g, '<li>$1</li>')
         .replace(/\n/g, '<br>');
-      
       const blobHtml = new Blob([`<div dir="rtl" style="font-family: Arial, sans-serif; font-size: 14px;">${htmlContent}</div>`], { type: 'text/html' });
       const blobText = new Blob([message.content], { type: 'text/plain' });
       await navigator.clipboard.write([new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobText })]);
@@ -144,14 +155,12 @@ const MessageBubble = ({ message }) => {
             <img src={logoImg} alt="AutoSpexy" className="w-full h-full object-contain" />
           </div>
         )}
-        
         <div className={`relative max-w-[85%] p-4 shadow-sm transition-all duration-300 ${
           isError ? 'bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl rounded-tr-none' :
           isAssistant ? 'bg-white border border-slate-200 rounded-2xl rounded-tl-none shadow-md' :
           'bg-blue-600 text-white rounded-2xl rounded-tr-none shadow-blue-500/30'
         }`}>
           <CleanUIContent content={message.content} isAssistant={isAssistant} />
-          
           {message.isStreaming && (
             <div className="flex space-x-1.5 mt-3">
               <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" />
@@ -161,7 +170,6 @@ const MessageBubble = ({ message }) => {
           )}
         </div>
       </div>
-
       {isAssistant && !message.isStreaming && !isError && (
         <div className="flex items-center mt-2 ml-10 space-x-4 rtl:space-x-reverse opacity-0 group-hover:opacity-100 transition-opacity duration-300">
           <button onClick={handleRichCopy} className="flex items-center text-[10px] font-bold text-slate-400 hover:text-blue-600 transition-colors">
@@ -184,8 +192,6 @@ const AICopilotSidebar = ({ isOpen, setIsOpen }) => {
   const [mode, setMode] = useState('autospex');
   const [selectedModel, setSelectedModel] = useState('llama33');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  
-  // 🔴 1. حالة الـ Preloader (idle, booting, done)
   const [bootState, setBootState] = useState('idle');
 
   const messagesEndRef = useRef(null);
@@ -197,20 +203,13 @@ const AICopilotSidebar = ({ isOpen, setIsOpen }) => {
     qwen: { name: 'AutoSpexy CODER', icon: '💻', desc: 'خبير الأكواد' }
   };
 
-// 🔴 2. تشغيل الـ Preloader (تم حل مشكلة التعليق)
-  // الدالة الأولى: بتلقط إنك فتحت الشات وتغير الحالة لـ booting
   useEffect(() => {
-    if (isOpen && bootState === 'idle') {
-      setBootState('booting');
-    }
+    if (isOpen && bootState === 'idle') setBootState('booting');
   }, [isOpen]);
 
-  // الدالة التانية: بتشغل العداد أول ما الحالة تبقى booting وتمشي بعد ثانيتين
   useEffect(() => {
     if (bootState === 'booting') {
-      const timer = setTimeout(() => {
-        setBootState('done');
-      }, 2000); // 2000 مللي ثانية = ثانيتين بس
+      const timer = setTimeout(() => setBootState('done'), 2000);
       return () => clearTimeout(timer);
     }
   }, [bootState]);
@@ -247,21 +246,41 @@ const AICopilotSidebar = ({ isOpen, setIsOpen }) => {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let acc = '';
+      let buffer = '';
+      let lastUpdate = Date.now(); // 🔴 لضبط سرعة الريندر ومنع كراش المتصفح
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const lines = decoder.decode(value).split('\n');
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; 
+
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
-          const parsed = JSON.parse(line.slice(6));
-          if (parsed.type === 'text') {
-            acc += parsed.text;
-            setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, content: acc } : m));
-          }
-          if (parsed.type === 'done') setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, isStreaming: false } : m));
-          if (parsed.type === 'error') throw new Error(parsed.message);
+          const dataStr = line.slice(6).trim();
+          if (!dataStr) continue;
+          
+          try {
+            const parsed = JSON.parse(dataStr);
+            if (parsed.type === 'text') {
+              acc += parsed.text;
+              // 🔴 Throttling: تحديث الشاشة كل 50 مللي ثانية فقط لتقليل الضغط على الـ RAM
+              if (Date.now() - lastUpdate > 50) {
+                setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, content: acc } : m));
+                lastUpdate = Date.now();
+              }
+            }
+            if (parsed.type === 'done') {
+              setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, content: acc, isStreaming: false } : m));
+            }
+            if (parsed.type === 'error') throw new Error(parsed.message);
+          } catch (err) {}
         }
       }
+      // تحديث نهائي عشان نضمن إن مفيش حروف وقعت
+      setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, content: acc, isStreaming: false } : m));
     } catch (e) {
       setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, content: 'عذراً، حدث خطأ في الاتصال بالسيرفر.', isError: true, isStreaming: false } : m));
     } finally {
@@ -272,7 +291,7 @@ const AICopilotSidebar = ({ isOpen, setIsOpen }) => {
   return (
     <>
       {!isOpen && (
-        <button onClick={() => setIsOpen(true)} className="fixed bottom-24 md:bottom-10 left-4 md:left-6 z-[100] w-14 h-14 flex items-center justify-center hover:scale-110 transition-transform group outline-none">
+        <button onClick={() => setIsOpen(true)} className="fixed bottom-24 md:bottom-10 left-4 md:left-6 z-[100] w-14 h-14 flex items-center justify-center hover:scale-110 transition-transform group outline-none bg-transparent border-none">
           <img src={logoImg} alt="AutoSpexy" className="w-full h-full object-contain drop-shadow-[0_4px_8px_rgba(37,99,235,0.4)] animate-pulse" />
           <div className="absolute top-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white shadow-sm" />
         </button>
@@ -280,15 +299,12 @@ const AICopilotSidebar = ({ isOpen, setIsOpen }) => {
 
       <div className={`fixed inset-y-0 left-0 z-[110] w-full max-w-sm bg-slate-50 shadow-2xl flex flex-col transform transition-transform duration-500 ease-in-out border-r border-slate-200 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         
-        {/* 🔴 3. شاشة الـ Preloader السينمائية */}
         <div className={`absolute inset-0 flex flex-col items-center justify-center bg-slate-50 transition-all duration-700 ease-in-out ${bootState === 'booting' ? 'opacity-100 z-[200]' : 'opacity-0 -z-10 pointer-events-none'}`}>
           <div className="relative flex items-center justify-center">
-            {/* تأثيرات الهالة (Aura) حول اللوجو */}
             <div className="absolute w-36 h-36 bg-blue-500/10 rounded-full blur-2xl animate-pulse" />
             <div className="absolute w-24 h-24 bg-blue-400/20 rounded-full blur-xl animate-ping" />
             <img src={logoImg} alt="AutoSpexy AI" className="w-20 h-20 object-contain relative z-10 drop-shadow-2xl animate-bounce" />
           </div>
-          
           <div className="mt-8 flex flex-col items-center">
             <h2 className="text-blue-800 font-black text-sm tracking-[0.4em] uppercase font-tech">AutoSpexy OS</h2>
             <div className="flex items-center mt-3 space-x-2 rtl:space-x-reverse">
@@ -304,7 +320,6 @@ const AICopilotSidebar = ({ isOpen, setIsOpen }) => {
               <div className="w-12 h-12 flex items-center justify-center drop-shadow-md">
                 <img src={logoImg} alt="AutoSpex" className="w-full h-full object-contain" />
               </div>
-              
               <div className="relative">
                 <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="flex flex-col text-left group outline-none">
                   <h3 className="text-[12px] font-black tracking-[0.1em] text-blue-700 uppercase">AutoSpexy AI</h3>
@@ -313,7 +328,6 @@ const AICopilotSidebar = ({ isOpen, setIsOpen }) => {
                     <ChevronDown size={12} className={`text-slate-400 transition-transform duration-300 ${isMenuOpen ? 'rotate-180' : ''}`} />
                   </div>
                 </button>
-
                 {isMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
@@ -340,7 +354,6 @@ const AICopilotSidebar = ({ isOpen, setIsOpen }) => {
               <button onClick={() => setIsOpen(false)} className="p-2 text-slate-400 hover:text-slate-800 transition-colors rounded-lg hover:bg-slate-100"><X size={22} /></button>
             </div>
           </div>
-
           <div className="flex mt-4 bg-slate-100 p-1 rounded-xl border border-slate-200">
             {[{ id: 'autospex', icon: <Crosshair size={14}/>, label: 'Project' }, { id: 'global', icon: <Globe size={14}/>, label: 'Industry' }, { id: 'troubleshoot', icon: <Wrench size={14}/>, label: 'Fix' }].map(m => (
               <button key={m.id} onClick={() => setMode(m.id)} className={`flex-1 flex items-center justify-center space-x-2 py-2 rounded-lg text-[10px] font-bold transition-all ${mode === m.id ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
