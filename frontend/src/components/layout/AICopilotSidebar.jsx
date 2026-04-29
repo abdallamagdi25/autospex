@@ -1,142 +1,269 @@
 import { useState, useRef, useEffect } from 'react';
-import { BrainCircuit, X, Send, Sparkles, Loader2, AlertCircle, Trash2 } from 'lucide-react';
+import { X, Send, Loader2, Trash2, Crosshair, Globe, Wrench, Copy, Share2, Check, ChevronDown, Layout, ExternalLink } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import logoImg from '../../assets/logo.png';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-const SUGGESTED_AR = [
-  "كيف أوصّل S7-1200 بمحرك السير؟",
-  "أرني كود Ladder Logic لاكتشاف الزجاجة",
-  "لماذا يرفض Snap7 الاتصال عبر الإيثرنت؟",
-  "اشرح لي الفرق بين Global DB و Instance DB",
-];
+// ── نافذة معاينة Ladder Logic ──
+const LadderVisualizer = ({ code }) => (
+  <div className="my-4 bg-slate-50 border border-blue-200 rounded-xl p-4 shadow-inner" dir="ltr">
+    <div className="flex items-center justify-between mb-3 border-b border-blue-100 pb-2">
+      <span className="text-[10px] font-black text-blue-700 uppercase tracking-widest flex items-center">
+        <Layout size={12} className="mr-1" /> Ladder Logic View
+      </span>
+    </div>
+    <div className="space-y-3 font-mono text-[11px] font-bold text-slate-800">
+      {code.split('\n').filter(l => l.trim()).map((line, i) => (
+        <div key={i} className="flex items-center group">
+          <div className="h-[2px] w-6 bg-blue-300" />
+          <div className="px-3 py-1 border-2 border-blue-400 rounded-md bg-white shadow-sm whitespace-pre">{line}</div>
+          <div className="h-[2px] flex-1 bg-blue-300 relative">
+            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-blue-400 rounded-full bg-white" />
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
 
-// ── Format text with code blocks ─────────────────────────────
-const FormattedContent = ({ content }) => {
-  const parts = content.split(/(```[\s\S]*?```)/g);
+// ── دالة تحليل النصوص المدمجة (Bold + Links) ──
+const parseInlineText = (text, isAssistant) => {
+  const parts = text.split(/(\*\*.*?\*\*|\[.*?\]\(https?:\/\/[^\s]+\)|https?:\/\/[a-zA-Z0-9-._~:/?#[\]@!$&'()*+,;=%]+)/g);
+  
+  return parts.map((part, idx) => {
+    if (!part) return null;
+
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={idx} className={`font-black ${isAssistant ? 'text-blue-800' : 'text-blue-100'}`}>{part.slice(2, -2)}</strong>;
+    }
+
+    const mdLinkMatch = part.match(/^\[(.*?)\]\((https?:\/\/[^\s]+)\)$/);
+    if (mdLinkMatch) {
+      return (
+        <a key={idx} href={mdLinkMatch[2]} target="_blank" rel="noopener noreferrer" dir="ltr" className="inline-flex items-center text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md text-[11px] hover:bg-blue-100 hover:shadow-sm mx-1 border border-blue-200 transition-all font-tech font-bold">
+          <ExternalLink size={10} className="mr-1" /> {mdLinkMatch[1]}
+        </a>
+      );
+    }
+
+    if (part.match(/^https?:\/\//)) {
+      const cleanUrl = part.replace(/[.,:;)\]]+$/, '');
+      let domain = 'زيارة الرابط';
+      try { domain = new URL(cleanUrl).hostname.replace('www.', ''); } catch(e) {}
+
+      return (
+        <a key={idx} href={cleanUrl} target="_blank" rel="noopener noreferrer" dir="ltr" className="inline-flex items-center text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md text-[11px] hover:bg-blue-100 hover:shadow-sm mx-1 border border-blue-200 transition-all font-tech font-bold">
+          <ExternalLink size={10} className="mr-1" /> {domain}
+        </a>
+      );
+    }
+
+    return <span key={idx}>{part}</span>;
+  });
+};
+
+// ── محرك التنسيق المتقدم ──
+const CleanUIContent = ({ content, isAssistant }) => {
+  if (content.includes('[LADDER]')) {
+    const parts = content.split(/\[LADDER\]([\s\S]*?)\[\/LADDER\]/gi);
+    return parts.map((p, i) => i % 2 === 1 ? <LadderVisualizer key={i} code={p} /> : <CleanUIContent key={i} content={p} isAssistant={isAssistant} />);
+  }
+
+  if (content.includes('```')) {
+    const parts = content.split(/(```[\s\S]*?```)/g);
+    return parts.map((p, i) => {
+      if (p.startsWith('```')) {
+        const codeBody = p.replace(/```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+        return <pre key={i} className="my-3 bg-[#0f172a] text-emerald-400 p-3 rounded-xl text-xs overflow-x-auto shadow-md" dir="ltr"><code>{codeBody}</code></pre>;
+      }
+      return <CleanUIContent key={i} content={p} isAssistant={isAssistant} />;
+    });
+  }
+
+  const lines = content.split('\n');
   return (
-    <>
-      {parts.map((part, i) => {
-        if (part.startsWith('```')) {
-          const lines    = part.slice(3).split('\n');
-          const lang     = lines[0].trim();
-          const codeBody = lines.slice(1).join('\n').replace(/```$/, '').trimEnd();
+    <div className={`space-y-1.5 text-[13px] leading-relaxed ${isAssistant ? 'text-slate-700' : 'text-white'}`}>
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={i} className="h-1" />;
+
+        if (trimmed.match(/^(###|##|#)\s*/)) {
+          const cleanText = trimmed.replace(/^(###|##|#)\s*/, '');
           return (
-            <div key={i} className="my-3 rounded-xl overflow-hidden border border-slate-800 shadow-md" dir="ltr">
-              {lang && (
-                <div className="bg-slate-800 px-4 py-1.5 text-[11px] font-bold text-slate-300 uppercase tracking-wider font-tech flex items-center">
-                  <span className="w-2 h-2 rounded-full bg-autospex-light mr-2"></span>
-                  {lang}
-                </div>
-              )}
-              <pre className="bg-slate-900 p-4 text-xs text-emerald-400 overflow-x-auto whitespace-pre-wrap break-all font-tech leading-relaxed">
-                <code>{codeBody}</code>
-              </pre>
+            <h3 key={i} className="text-blue-800 font-black text-[14px] mt-4 mb-1 border-b border-blue-100 pb-1 inline-block">
+              {parseInlineText(cleanText, isAssistant)}
+            </h3>
+          );
+        }
+
+        if (trimmed.match(/^([-*])\s+/)) {
+          const cleanText = trimmed.replace(/^([-*])\s+/, '');
+          return (
+            <div key={i} className="flex items-start space-x-2 rtl:space-x-reverse my-1">
+              <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-2 shrink-0 shadow-sm" />
+              <p className="flex-1 font-semibold">{parseInlineText(cleanText, isAssistant)}</p>
             </div>
           );
         }
-        return <span key={i} className="whitespace-pre-wrap break-words leading-relaxed">{part}</span>;
+
+        return <p key={i} className="font-semibold">{parseInlineText(trimmed, isAssistant)}</p>;
       })}
-    </>
-  );
-};
-
-// ── Message Bubble ─────────────────────────────────────────────
-const MessageBubble = ({ message }) => {
-  const isAssistant = message.role === 'assistant';
-  const isError     = message.isError;
-
-  return (
-    <div className={`flex ${isAssistant ? 'justify-start' : 'justify-end'} mb-4`}>
-      <div className={`w-full max-w-[88%] p-4 rounded-2xl text-sm overflow-hidden shadow-sm ${
-        isError
-          ? 'bg-rose-50 border border-rose-200 text-rose-700 rounded-tr-none'
-          : isAssistant
-          ? 'bg-white border border-slate-200 text-slate-800 rounded-tr-none' 
-          : 'bg-autospex-primary text-white rounded-tl-none' 
-      }`}>
-        {isError && <AlertCircle size={16} className="inline ml-1.5 mb-0.5" />}
-        <FormattedContent content={message.content} />
-        {message.isStreaming && (
-          <span className="inline-block w-1.5 h-4 bg-autospex-light mx-1 animate-pulse rounded-sm align-middle" />
-        )}
-      </div>
     </div>
   );
 };
 
-// ── Main Component ─────────────────────────────────────────────
-const AICopilotSidebar = ({ isOpen, setIsOpen, t }) => {
+const MessageBubble = ({ message }) => {
+  const isAssistant = message.role === 'assistant';
+  const isError = message.isError;
+  const [copied, setCopied] = useState(false);
+
+  const handleRichCopy = async () => {
+    try {
+      let htmlContent = message.content
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        .replace(/### (.*?)\n/g, '<h3 style="color:#1e40af;">$1</h3>')
+        .replace(/[-*] (.*?)\n/g, '<li>$1</li>')
+        .replace(/\n/g, '<br>');
+      
+      const blobHtml = new Blob([`<div dir="rtl" style="font-family: Arial, sans-serif; font-size: 14px;">${htmlContent}</div>`], { type: 'text/html' });
+      const blobText = new Blob([message.content], { type: 'text/plain' });
+      await navigator.clipboard.write([new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobText })]);
+    } catch (err) {
+      navigator.clipboard.writeText(message.content);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className={`flex flex-col ${isAssistant ? 'items-start' : 'items-end'} mb-6 group w-full`}>
+      <div className={`flex ${isAssistant ? 'flex-row' : 'flex-row-reverse'} items-end w-full max-w-full`}>
+        {isAssistant && (
+          <div className="w-8 h-8 mr-2 shrink-0 flex items-center justify-center animate-pulse drop-shadow-md mb-1">
+            <img src={logoImg} alt="AutoSpexy" className="w-full h-full object-contain" />
+          </div>
+        )}
+        
+        <div className={`relative max-w-[85%] p-4 shadow-sm transition-all duration-300 ${
+          isError ? 'bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl rounded-tr-none' :
+          isAssistant ? 'bg-white border border-slate-200 rounded-2xl rounded-tl-none shadow-md' :
+          'bg-blue-600 text-white rounded-2xl rounded-tr-none shadow-blue-500/30'
+        }`}>
+          <CleanUIContent content={message.content} isAssistant={isAssistant} />
+          
+          {message.isStreaming && (
+            <div className="flex space-x-1.5 mt-3">
+              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" />
+              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce [animation-delay:0.4s]" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {isAssistant && !message.isStreaming && !isError && (
+        <div className="flex items-center mt-2 ml-10 space-x-4 rtl:space-x-reverse opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          <button onClick={handleRichCopy} className="flex items-center text-[10px] font-bold text-slate-400 hover:text-blue-600 transition-colors">
+            {copied ? <Check size={12} className="mr-1 text-emerald-600" /> : <Copy size={12} className="mr-1" />} نسخ (تصدير)
+          </button>
+          <button onClick={() => navigator.share?.({text: message.content})} className="flex items-center text-[10px] font-bold text-slate-400 hover:text-blue-600 transition-colors">
+            <Share2 size={12} className="mr-1" /> مشاركة
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const AICopilotSidebar = ({ isOpen, setIsOpen }) => {
   const { user } = useAuth();
-  const [messages, setMessages] = useState([
-    { role: 'assistant', content: `مرحباً مهندس ${user?.full_name?.split(' ')[0] || user?.name?.split(' ')[0] || ''}! أنا المساعد الذكي الخاص بـ AutoSpex. كيف يمكنني مساعدتك في مشروعك اليوم؟` }
-  ]);
-  const [input, setInput]     = useState('');
+  const [messages, setMessages] = useState([{ role: 'assistant', content: `مرحباً مهندس **${user?.full_name?.split(' ')[0] || 'عبد الله'}**! أنا **AutoSpexy** 🤖، جاهز لدعم مشروعك.` }]);
+  const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [mode, setMode] = useState('autospex');
+  const [selectedModel, setSelectedModel] = useState('llama33');
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  
+  // 🔴 1. حالة الـ Preloader (idle, booting, done)
+  const [bootState, setBootState] = useState('idle');
+
   const messagesEndRef = useRef(null);
-  const inputRef       = useRef(null);
+  const inputRef = useRef(null);
+
+  const models = {
+    llama33: { name: 'AutoSpexy MAX', icon: '🚀', desc: 'الأقوى والأذكى' },
+    llama31: { name: 'AutoSpexy FAST', icon: '⚡', desc: 'استجابة لحظية' },
+    qwen: { name: 'AutoSpexy CODER', icon: '💻', desc: 'خبير الأكواد' }
+  };
+
+// 🔴 2. تشغيل الـ Preloader (تم حل مشكلة التعليق)
+  // الدالة الأولى: بتلقط إنك فتحت الشات وتغير الحالة لـ booting
+  useEffect(() => {
+    if (isOpen && bootState === 'idle') {
+      setBootState('booting');
+    }
+  }, [isOpen]);
+
+  // الدالة التانية: بتشغل العداد أول ما الحالة تبقى booting وتمشي بعد ثانيتين
+  useEffect(() => {
+    if (bootState === 'booting') {
+      const timer = setTimeout(() => {
+        setBootState('done');
+      }, 2000); // 2000 مللي ثانية = ثانيتين بس
+      return () => clearTimeout(timer);
+    }
+  }, [bootState]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (isOpen && !isLoading && bootState === 'done') inputRef.current?.focus();
+  }, [messages, isOpen, isLoading, bootState]);
 
-  useEffect(() => {
-    if (isOpen) setTimeout(() => inputRef.current?.focus(), 300);
-  }, [isOpen]);
+  const handleInputChange = (e) => {
+    setInput(e.target.value);
+    e.target.style.height = 'auto';
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+  };
 
-  const sendMessage = async (text) => {
-    const userText = text || input.trim();
-    if (!userText || isLoading) return;
-
+  const sendMessage = async () => {
+    if (!input.trim() || isLoading) return;
+    const userText = input;
     setInput('');
+    if(inputRef.current) inputRef.current.style.height = 'auto'; 
     setIsLoading(true);
-
-    const newMessages = [...messages, { role: 'user', content: userText }];
-    setMessages(newMessages);
+    const newMsgs = [...messages, { role: 'user', content: userText }];
+    setMessages(newMsgs);
 
     const streamingId = Date.now();
-    setMessages(prev => [
-      ...prev,
-      { id: streamingId, role: 'assistant', content: '', isStreaming: true }
-    ]);
+    setMessages(prev => [...prev, { id: streamingId, role: 'assistant', content: '', isStreaming: true }]);
 
     try {
       const res = await fetch(`${BACKEND_URL}/api/copilot`, {
-        method:  'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages }),
+        body: JSON.stringify({ messages: newMsgs, mode, modelChoice: selectedModel }),
       });
-
-      if (!res.ok) throw new Error(`Server error`);
-
-      const reader  = res.body.getReader();
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let accumulated = '';
-
+      let acc = '';
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
+        const lines = decoder.decode(value).split('\n');
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
-          try {
-            const parsed = JSON.parse(line.slice(6));
-            if (parsed.type === 'text') {
-              accumulated += parsed.text;
-              setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, content: accumulated, isStreaming: true } : m));
-            }
-            if (parsed.type === 'done') {
-              setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, isStreaming: false } : m));
-            }
-            if (parsed.type === 'error') throw new Error(parsed.message);
-          } catch (_) { }
+          const parsed = JSON.parse(line.slice(6));
+          if (parsed.type === 'text') {
+            acc += parsed.text;
+            setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, content: acc } : m));
+          }
+          if (parsed.type === 'done') setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, isStreaming: false } : m));
+          if (parsed.type === 'error') throw new Error(parsed.message);
         }
       }
-    } catch (err) {
-      setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, content: `عذراً، حدث خطأ في الاتصال: ${err.message}`, isStreaming: false, isError: true } : m));
+    } catch (e) {
+      setMessages(prev => prev.map(m => m.id === streamingId ? { ...m, content: 'عذراً، حدث خطأ في الاتصال بالسيرفر.', isError: true, isStreaming: false } : m));
     } finally {
       setIsLoading(false);
     }
@@ -144,103 +271,103 @@ const AICopilotSidebar = ({ isOpen, setIsOpen, t }) => {
 
   return (
     <>
-      {/* Floating Button */}
       {!isOpen && (
-        <button
-          onClick={() => setIsOpen(true)}
-          /* Z-Index مرتفع جداً والزر مرفوع لتجنب تداخل شريط التنقل السفلي في الموبايل */
-          className={`fixed bottom-28 md:bottom-10 left-4 md:left-6 z-[90] w-14 h-14 bg-autospex-primary rounded-full flex items-center justify-center shadow-xl shadow-blue-500/30 hover:scale-110 transition-transform`}
-          title="فتح المساعد الذكي"
-        >
-          <BrainCircuit className="text-white" size={26} />
-          <span className="absolute inset-0 rounded-full bg-autospex-light animate-ping opacity-30" />
+        <button onClick={() => setIsOpen(true)} className="fixed bottom-24 md:bottom-10 left-4 md:left-6 z-[100] w-14 h-14 flex items-center justify-center hover:scale-110 transition-transform group outline-none">
+          <img src={logoImg} alt="AutoSpexy" className="w-full h-full object-contain drop-shadow-[0_4px_8px_rgba(37,99,235,0.4)] animate-pulse" />
+          <div className="absolute top-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white shadow-sm" />
         </button>
       )}
 
-      {/* Sidebar Panel */}
-      {/* Z-[110] للتأكد من ظهوره فوق كل شيء حتى شريط التنقل السفلي */}
-      <div className={`fixed inset-y-0 left-0 z-[110] w-full max-w-sm bg-slate-50 border-r border-slate-200 shadow-2xl flex flex-col transform transition-transform duration-500 ${
-        isOpen ? 'translate-x-0' : '-translate-x-full'
-      }`}>
-
-        {/* Header */}
-        <div className="shrink-0 p-5 border-b border-slate-200 bg-white flex justify-between items-center shadow-sm relative z-10">
-          <div className="flex items-center space-x-3 rtl:space-x-reverse">
-            <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center border border-blue-100">
-              <Sparkles className="text-autospex-primary" size={20} />
-            </div>
-            <div>
-              <h3 className="text-slate-900 font-extrabold text-base">المساعد الهندسي (AI)</h3>
-              <div className="flex items-center space-x-1.5 rtl:space-x-reverse mt-0.5">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                <span className="text-slate-500 text-[10px] font-bold font-tech uppercase tracking-wider">Llama 3.3 • Live</span>
-              </div>
-            </div>
+      <div className={`fixed inset-y-0 left-0 z-[110] w-full max-w-sm bg-slate-50 shadow-2xl flex flex-col transform transition-transform duration-500 ease-in-out border-r border-slate-200 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        
+        {/* 🔴 3. شاشة الـ Preloader السينمائية */}
+        <div className={`absolute inset-0 flex flex-col items-center justify-center bg-slate-50 transition-all duration-700 ease-in-out ${bootState === 'booting' ? 'opacity-100 z-[200]' : 'opacity-0 -z-10 pointer-events-none'}`}>
+          <div className="relative flex items-center justify-center">
+            {/* تأثيرات الهالة (Aura) حول اللوجو */}
+            <div className="absolute w-36 h-36 bg-blue-500/10 rounded-full blur-2xl animate-pulse" />
+            <div className="absolute w-24 h-24 bg-blue-400/20 rounded-full blur-xl animate-ping" />
+            <img src={logoImg} alt="AutoSpexy AI" className="w-20 h-20 object-contain relative z-10 drop-shadow-2xl animate-bounce" />
           </div>
-          <div className="flex items-center space-x-2 rtl:space-x-reverse">
-            <button onClick={() => setMessages([{ role: 'assistant', content: 'تم مسح المحادثة. كيف يمكنني مساعدتك؟' }])} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors">
-              <Trash2 size={18} />
-            </button>
-            <button onClick={() => setIsOpen(false)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors">
-              <X size={20} />
-            </button>
+          
+          <div className="mt-8 flex flex-col items-center">
+            <h2 className="text-blue-800 font-black text-sm tracking-[0.4em] uppercase font-tech">AutoSpexy OS</h2>
+            <div className="flex items-center mt-3 space-x-2 rtl:space-x-reverse">
+              <Loader2 size={12} className="text-blue-500 animate-spin" />
+              <p className="text-blue-500 text-[9px] font-black uppercase tracking-widest">Initializing AI Core...</p>
+            </div>
           </div>
         </div>
 
-        {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50 pb-safe">
-          {messages.map((m, i) => <MessageBubble key={m.id || i} message={m} />)}
-
-          {/* Suggestions */}
-          {messages.length <= 1 && (
-            <div className="space-y-2 pt-4">
-              <p className="text-slate-400 text-[11px] uppercase font-extrabold tracking-wider px-1">اقتراحات للبدء</p>
-              {SUGGESTED_AR.map((s, i) => (
-                <button
-                  key={i} onClick={() => sendMessage(s)}
-                  className="w-full text-right text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:border-autospex-primary hover:text-autospex-primary p-3.5 rounded-2xl transition-all shadow-sm hover:shadow-md"
-                >
-                  {s}
+        <div className="p-4 bg-white border-b border-slate-200 shadow-sm relative z-20">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center space-x-3 rtl:space-x-reverse">
+              <div className="w-12 h-12 flex items-center justify-center drop-shadow-md">
+                <img src={logoImg} alt="AutoSpex" className="w-full h-full object-contain" />
+              </div>
+              
+              <div className="relative">
+                <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="flex flex-col text-left group outline-none">
+                  <h3 className="text-[12px] font-black tracking-[0.1em] text-blue-700 uppercase">AutoSpexy AI</h3>
+                  <div className="flex items-center space-x-1 rtl:space-x-reverse">
+                    <span className="text-[10px] font-bold text-slate-600 group-hover:text-blue-600 transition-colors">{models[selectedModel].name}</span>
+                    <ChevronDown size={12} className={`text-slate-400 transition-transform duration-300 ${isMenuOpen ? 'rotate-180' : ''}`} />
+                  </div>
                 </button>
-              ))}
-            </div>
-          )}
 
-          {/* Loading State */}
-          {isLoading && messages[messages.length - 1]?.content === '' && (
-            <div className="flex justify-start mb-4">
-              <div className="bg-white border border-slate-200 shadow-sm rounded-2xl rounded-tr-none px-5 py-3.5 flex items-center space-x-3 rtl:space-x-reverse">
-                <Loader2 size={16} className="text-autospex-primary animate-spin" />
-                <span className="text-slate-500 text-xs font-bold">جاري تحليل الكود...</span>
+                {isMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
+                    <div className="absolute top-full left-0 mt-3 w-52 bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-slate-100 overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
+                      <div className="p-2 bg-slate-50 text-[9px] font-bold text-slate-400 uppercase tracking-wider">اختر قوة المعالجة</div>
+                      {Object.entries(models).map(([key, m]) => (
+                        <button key={key} onClick={() => { setSelectedModel(key); setIsMenuOpen(false); }} className={`w-full p-4 text-left hover:bg-blue-50 transition-all border-b border-slate-50 last:border-0 ${selectedModel === key ? 'bg-blue-50 border-l-4 border-blue-600' : ''}`}>
+                          <div className="flex items-center space-x-3 rtl:space-x-reverse">
+                            <span className="text-xl">{m.icon}</span>
+                            <div>
+                              <p className="text-[10px] font-black text-slate-900 uppercase tracking-tight">{m.name}</p>
+                              <p className="text-[9px] text-slate-500 font-medium">{m.desc}</p>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
-          )}
+            <div className="flex items-center space-x-1">
+              <button onClick={() => setMessages([{ role: 'assistant', content: 'تم تصفير الذاكرة.' }])} className="p-2 text-slate-400 hover:text-rose-500 transition-colors rounded-lg hover:bg-rose-50"><Trash2 size={18}/></button>
+              <button onClick={() => setIsOpen(false)} className="p-2 text-slate-400 hover:text-slate-800 transition-colors rounded-lg hover:bg-slate-100"><X size={22} /></button>
+            </div>
+          </div>
+
+          <div className="flex mt-4 bg-slate-100 p-1 rounded-xl border border-slate-200">
+            {[{ id: 'autospex', icon: <Crosshair size={14}/>, label: 'Project' }, { id: 'global', icon: <Globe size={14}/>, label: 'Industry' }, { id: 'troubleshoot', icon: <Wrench size={14}/>, label: 'Fix' }].map(m => (
+              <button key={m.id} onClick={() => setMode(m.id)} className={`flex-1 flex items-center justify-center space-x-2 py-2 rounded-lg text-[10px] font-bold transition-all ${mode === m.id ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                {m.icon} <span>{m.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50 space-y-2">
+          {messages.map((m, i) => <MessageBubble key={m.id || i} message={m} />)}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Area */}
-        <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="shrink-0 p-4 border-t border-slate-200 bg-white pb-safe">
-          <div className="relative">
+        <form onSubmit={e => { e.preventDefault(); sendMessage(); }} className="p-4 bg-white border-t border-slate-200 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
+          <div className="relative flex items-end bg-slate-100 rounded-2xl p-1.5 focus-within:ring-2 focus-within:ring-blue-500/20 border border-transparent focus-within:border-blue-200 transition-all">
             <textarea
-              ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-              placeholder="اسأل عن الأكواد، التوصيلات، أو التوأم الرقمي..."
-              rows={1} disabled={isLoading}
-              className="w-full bg-slate-50 border border-slate-200 focus:border-autospex-primary focus:ring-2 focus:ring-blue-500/20 rounded-2xl py-3.5 px-4 pl-12 text-sm text-slate-900 placeholder:text-slate-400 transition-all resize-none shadow-inner"
-              style={{ minHeight: '52px', maxHeight: '120px' }}
+              ref={inputRef} value={input} onChange={handleInputChange}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+              placeholder="تحدث مع AutoSpexy..."
+              rows={1} disabled={isLoading || bootState === 'booting'}
+              className="flex-1 bg-transparent border-none focus:ring-0 text-[13px] py-3 px-3 text-slate-800 placeholder:text-slate-400 font-semibold resize-none min-h-[44px] max-h-[120px] overflow-y-auto outline-none"
             />
-            <button
-              type="submit" disabled={isLoading || !input.trim()}
-              className={`absolute top-1/2 -translate-y-1/2 left-3 p-2 rounded-xl transition-all ${
-                input.trim() && !isLoading ? 'bg-autospex-primary text-white shadow-md hover:bg-blue-700 hover:scale-105' : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-              }`}
-            >
-              <Send size={16} className="rtl:-scale-x-100" />
+            <button type="submit" disabled={!input.trim() || isLoading || bootState === 'booting'} className={`p-3 rounded-xl ml-1 rtl:mr-1 shrink-0 transition-all ${input.trim() && !isLoading ? 'bg-blue-600 text-white shadow-md hover:-translate-y-0.5' : 'bg-slate-200 text-slate-400'}`}>
+              {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} className="rtl:-scale-x-100" />}
             </button>
           </div>
-          <p className="text-slate-400 text-[10px] font-medium text-center mt-3 font-tech">
-            Enter to send • Shift+Enter for new line
-          </p>
         </form>
       </div>
     </>
